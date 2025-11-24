@@ -9,7 +9,7 @@ interface ExpenseFormProps {
 }
 
 const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose }) => {
-  const { people, cards, addExpense } = context;
+  const { people, cards, addExpense, invoices } = context;
 
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
@@ -38,6 +38,14 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose }) => {
     e.preventDefault();
     if (!amount || !personId || !cardId) return;
 
+    // Find the currently open invoice to attach the expense to
+    const openInvoice = invoices.find(i => i.status === 'open');
+
+    if (!openInvoice) {
+      alert("Não há fatura aberta para adicionar despesas. Crie ou abra uma fatura primeiro.");
+      return;
+    }
+
     addExpense({
       id: crypto.randomUUID(),
       description: description.trim() || "Despesa Avulsa",
@@ -47,6 +55,7 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose }) => {
       cardId,
       categoryId: category,
       aiAnalysis: aiTip || undefined,
+      invoiceId: openInvoice.id,
     });
     onClose();
   };
