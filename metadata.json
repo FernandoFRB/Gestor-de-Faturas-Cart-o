@@ -1,0 +1,5 @@
+{
+  "name": "Gestor de Gastos Compartilhado",
+  "description": "Um gerenciador de despesas de cartão de crédito moderno. Permite gerenciar múltiplas pessoas e cartões, visualizar gráficos de gastos e usa IA Gemini para categorizar despesas automaticamente.",
+  "requestFramePermissions": []
+}
