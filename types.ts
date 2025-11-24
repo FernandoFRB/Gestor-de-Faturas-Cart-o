@@ -63,6 +63,7 @@ export interface AppContextType extends AppState {
   updateCard: (card: CreditCard) => void;
   deleteCard: (id: string) => void;
   addExpense: (expense: Expense) => void;
+  updateExpense: (expense: Expense) => void;
   deleteExpense: (id: string) => void;
   addPayment: (payment: Payment) => void;
   deletePayment: (id: string) => void;

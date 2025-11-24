@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { AppContextType, CategoryType } from "../types";
-import { Trash2, Calendar, CreditCard, Plus, Lock, Unlock, TrendingUp, PlusCircle, FileText, AlertTriangle, ArrowRight } from "lucide-react";
+import { AppContextType, CategoryType, Expense } from "../types";
+import { Trash2, Calendar, CreditCard, Plus, Lock, Unlock, TrendingUp, PlusCircle, FileText, AlertTriangle, ArrowRight, Edit2 } from "lucide-react";
 import { analyzeExpenseWithGemini } from "../services/geminiService";
 import { generateInvoicePDF } from "../services/pdfService";
+import ExpenseForm from "./ExpenseForm";
 
 interface ExpenseListProps {
   context: AppContextType;
@@ -14,6 +15,9 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>("");
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
   const [newInvoiceName, setNewInvoiceName] = useState("");
+
+  // Edit Expense State
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   // Close Invoice Modal State
   const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
@@ -76,8 +80,6 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
     if (!selectedInvoice) return;
     
     // Calculate Global Debt for each person
-    // Debt = Total Expenses (All time) - Total Payments (All time)
-    // This is simplified, but effectively checks "What is currently owed"
     const debts = people.map(p => {
        const totalSpent = expenses.filter(e => e.personId === p.id).reduce((acc, curr) => acc + curr.amount, 0);
        const totalPaid = payments.filter(pay => pay.personId === p.id).reduce((acc, curr) => acc + curr.amount, 0);
@@ -96,24 +98,20 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
   const confirmCloseInvoice = () => {
     if (!selectedInvoice) return;
 
-    // 0. Generate PDF Report automatically
-    generateInvoicePDF(selectedInvoice, currentExpenses, people, cards);
+    // 0. Generate PDF Report automatically (passing ALL expenses and payments for global summary)
+    generateInvoicePDF(selectedInvoice, currentExpenses, people, cards, expenses, payments);
 
     // 1. Create Next Invoice
     const newInvoiceId = createInvoice(nextMonthName);
 
     // 2. Handle Debts (Rollover)
     closingDebts.forEach(debt => {
-       // To carry over debt without duplicating global debt count:
-       // A: Add a 'Payment' to settle the old debt record (Neutralizes previous invoices)
-       // B: Add an 'Expense' in the new invoice to represent the debt moving forward
-       
        // A: Settle old
        addPayment({
          id: crypto.randomUUID(),
          personId: debt.personId,
          amount: debt.debt,
-         date: new Date().toISOString().split("T")[0], // Paid "Today" by system
+         date: new Date().toISOString().split("T")[0],
        });
 
        // B: Create new debt
@@ -121,7 +119,7 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
          id: crypto.randomUUID(),
          invoiceId: newInvoiceId,
          personId: debt.personId,
-         cardId: cards[0]?.id || "unknown", // Default to first card if needed
+         cardId: cards[0]?.id || "unknown",
          amount: debt.debt,
          description: `Saldo Anterior (${selectedInvoice.name})`,
          date: new Date().toISOString().split("T")[0],
@@ -185,6 +183,15 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
   return (
     <div className="space-y-6 animate-fade-in relative">
       
+      {/* Edit Modal */}
+      {editingExpense && (
+        <ExpenseForm 
+          context={context} 
+          onClose={() => setEditingExpense(null)} 
+          initialData={editingExpense}
+        />
+      )}
+
       {/* --- Header: Invoice Selector --- */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-slate-100">
         <div className="flex items-center gap-3 w-full md:w-auto">
@@ -411,7 +418,7 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
                 Relatório de Fechamento: <span className="text-emerald-400">{selectedInvoice.name}</span>
               </h3>
               <button 
-                 onClick={() => generateInvoicePDF(selectedInvoice, currentExpenses, people, cards)}
+                 onClick={() => generateInvoicePDF(selectedInvoice, currentExpenses, people, cards, expenses, payments)}
                  className="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded flex items-center gap-2 transition"
               >
                  <FileText size={14} /> Baixar PDF
@@ -490,7 +497,7 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
                   <th className="px-6 py-3">Descrição</th>
                   <th className="px-6 py-3">Quem</th>
                   <th className="px-6 py-3">Cartão</th>
-                  <th className="px-6 py-3 w-10"></th>
+                  <th className="px-6 py-3 text-center w-24">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -515,15 +522,24 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
                         </div>
                     </td>
                     <td className="px-6 py-3 text-center">
-                      {selectedInvoice?.status === 'open' && (
-                        <button
-                          onClick={() => deleteExpense(expense.id)}
-                          className="text-slate-300 hover:text-red-500 transition opacity-0 group-hover:opacity-100"
-                          title="Remover"
+                      <div className="flex justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                         <button
+                          onClick={() => setEditingExpense(expense)}
+                          className="text-slate-300 hover:text-indigo-600 transition"
+                          title="Editar"
                         >
-                          <Trash2 size={16} />
+                          <Edit2 size={16} />
                         </button>
-                      )}
+                        {selectedInvoice?.status === 'open' && (
+                          <button
+                            onClick={() => deleteExpense(expense.id)}
+                            className="text-slate-300 hover:text-red-500 transition"
+                            title="Remover"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

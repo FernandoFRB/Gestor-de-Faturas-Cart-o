@@ -52,6 +52,7 @@ export default function App() {
   const deleteCard = (id: string) => setState(prev => ({ ...prev, cards: prev.cards.filter(x => x.id !== id) }));
 
   const addExpense = (e: Expense) => setState(prev => ({ ...prev, expenses: [e, ...prev.expenses] }));
+  const updateExpense = (updated: Expense) => setState(prev => ({ ...prev, expenses: prev.expenses.map(e => e.id === updated.id ? updated : e) }));
   const deleteExpense = (id: string) => setState(prev => ({ ...prev, expenses: prev.expenses.filter(x => x.id !== id) }));
 
   const addPayment = (p: Payment) => setState(prev => ({ ...prev, payments: [p, ...((prev.payments) || [])] }));
@@ -91,7 +92,7 @@ export default function App() {
     ...state,
     addPerson, updatePerson, deletePerson,
     addCard, updateCard, deleteCard,
-    addExpense, deleteExpense,
+    addExpense, updateExpense, deleteExpense,
     addPayment, deletePayment,
     createInvoice, toggleInvoiceStatus, deleteInvoice
   };

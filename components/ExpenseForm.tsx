@@ -1,15 +1,16 @@
-import React, { useState } from "react";
-import { AppContextType, CategoryType } from "../types";
+import React, { useState, useEffect } from "react";
+import { AppContextType, CategoryType, Expense } from "../types";
 import { analyzeExpenseWithGemini } from "../services/geminiService";
-import { Sparkles, Save, Loader2 } from "lucide-react";
+import { Sparkles, Save, Loader2, Edit2 } from "lucide-react";
 
 interface ExpenseFormProps {
   context: AppContextType;
   onClose: () => void;
+  initialData?: Expense | null; // Added for edit mode
 }
 
-const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose }) => {
-  const { people, cards, addExpense, invoices } = context;
+const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose, initialData }) => {
+  const { people, cards, addExpense, updateExpense, invoices } = context;
 
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
@@ -19,6 +20,19 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose }) => {
   const [category, setCategory] = useState<string>(CategoryType.Other);
   const [aiTip, setAiTip] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Populate form if editing
+  useEffect(() => {
+    if (initialData) {
+      setDescription(initialData.description);
+      setAmount(initialData.amount.toString());
+      setDate(initialData.date);
+      setPersonId(initialData.personId);
+      setCardId(initialData.cardId);
+      setCategory(initialData.categoryId);
+      setAiTip(initialData.aiAnalysis || null);
+    }
+  }, [initialData]);
 
   const handleAnalyze = async () => {
     if (!description || !amount) return;
@@ -38,33 +52,48 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose }) => {
     e.preventDefault();
     if (!amount || !personId || !cardId) return;
 
-    // Find the currently open invoice to attach the expense to
-    const openInvoice = invoices.find(i => i.status === 'open');
+    if (initialData) {
+      // Update existing
+      updateExpense({
+        ...initialData,
+        description: description.trim() || "Despesa Avulsa",
+        amount: parseFloat(amount),
+        date,
+        personId,
+        cardId,
+        categoryId: category,
+        aiAnalysis: aiTip || undefined,
+      });
+    } else {
+      // Create new
+      const openInvoice = invoices.find(i => i.status === 'open');
+      if (!openInvoice) {
+        alert("Não há fatura aberta para adicionar despesas. Crie ou abra uma fatura primeiro.");
+        return;
+      }
 
-    if (!openInvoice) {
-      alert("Não há fatura aberta para adicionar despesas. Crie ou abra uma fatura primeiro.");
-      return;
+      addExpense({
+        id: crypto.randomUUID(),
+        description: description.trim() || "Despesa Avulsa",
+        amount: parseFloat(amount),
+        date,
+        personId,
+        cardId,
+        categoryId: category,
+        aiAnalysis: aiTip || undefined,
+        invoiceId: openInvoice.id,
+      });
     }
-
-    addExpense({
-      id: crypto.randomUUID(),
-      description: description.trim() || "Despesa Avulsa",
-      amount: parseFloat(amount),
-      date,
-      personId,
-      cardId,
-      categoryId: category,
-      aiAnalysis: aiTip || undefined,
-      invoiceId: openInvoice.id,
-    });
+    
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
       <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden animate-fade-in">
-        <div className="p-6 border-b border-slate-100">
-          <h2 className="text-xl font-bold text-slate-800">Nova Despesa</h2>
+        <div className="p-6 border-b border-slate-100 flex items-center gap-2">
+          {initialData ? <Edit2 size={20} className="text-indigo-600" /> : <Sparkles size={20} className="text-indigo-600" />}
+          <h2 className="text-xl font-bold text-slate-800">{initialData ? "Editar Despesa" : "Nova Despesa"}</h2>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
@@ -76,7 +105,7 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose }) => {
               type="number"
               required
               step="0.01"
-              autoFocus
+              autoFocus={!initialData}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               className="w-full p-4 text-2xl font-bold text-slate-800 border border-slate-300 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition"
@@ -186,7 +215,7 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose }) => {
               type="submit"
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 transition shadow-sm"
             >
-              <Save size={18} /> Salvar
+              <Save size={18} /> {initialData ? "Atualizar" : "Salvar"}
             </button>
           </div>
         </form>
