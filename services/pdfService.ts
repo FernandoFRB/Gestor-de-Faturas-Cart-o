@@ -1,3 +1,4 @@
+
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Invoice, Expense, Person, CreditCard, Payment } from "../types";
@@ -7,8 +8,8 @@ export const generateInvoicePDF = (
   invoiceExpenses: Expense[],
   people: Person[],
   cards: CreditCard[],
-  allExpenses: Expense[] = [], // Optional for backward compatibility, but required for full report
-  payments: Payment[] = []
+  allExpenses: Expense[] = [], // Full history for global summary
+  allPayments: Payment[] = [] // Full payment history for global summary
 ) => {
   const doc = new jsPDF();
 
@@ -31,64 +32,120 @@ export const generateInvoicePDF = (
   let finalY = 35;
 
   // --- PART 1: GLOBAL SUMMARY (Total Individual Report) ---
-  // If we have access to all history (which we should via updated call)
   if (allExpenses.length > 0) {
     doc.setFontSize(12);
-    doc.setTextColor(0, 0, 0);
-    doc.text("Resumo Geral (Acumulado)", 14, finalY);
+    doc.setTextColor(79, 70, 229); // Indigo
+    doc.text("Resumo Geral (Acumulado do Sistema)", 14, finalY);
 
-    const summaryData = people.map(p => {
-       const totalSpent = allExpenses.filter(e => e.personId === p.id).reduce((acc, curr) => acc + curr.amount, 0);
-       const totalPaid = payments.filter(pay => pay.personId === p.id).reduce((acc, curr) => acc + curr.amount, 0);
-       const remainingDebt = totalSpent - totalPaid;
-       return [
-         p.name,
-         formatCurrency(totalSpent),
-         formatCurrency(totalPaid),
-         formatCurrency(remainingDebt)
-       ];
+    const globalSummaryData = people.map(p => {
+        // Calculate All Time Totals
+        const totalSpentAllTime = allExpenses.filter(e => e.personId === p.id).reduce((acc, curr) => acc + curr.amount, 0);
+        const totalPaidAllTime = allPayments.filter(pay => pay.personId === p.id).reduce((acc, curr) => acc + curr.amount, 0);
+        const currentDebt = totalSpentAllTime - totalPaidAllTime;
+        
+        return [
+          p.name,
+          formatCurrency(totalSpentAllTime),
+          formatCurrency(totalPaidAllTime),
+          formatCurrency(currentDebt)
+        ];
     });
 
     autoTable(doc, {
       startY: finalY + 5,
-      head: [["Pessoa", "Total Gasto (Histórico)", "Total Pago (Histórico)", "Saldo Devedor"]],
-      body: summaryData,
+      head: [["Pessoa", "Total Gasto (Histórico)", "Total Pago (Histórico)", "Saldo Devedor Atual"]],
+      body: globalSummaryData,
       theme: "grid",
-      headStyles: { fillColor: [50, 50, 50] },
+      headStyles: { fillColor: [79, 70, 229] }, // Indigo
       columnStyles: {
         1: { halign: 'right' },
-        2: { halign: 'right' },
-        3: { halign: 'right', fontStyle: 'bold' }
+        2: { halign: 'right', textColor: [22, 163, 74] }, // green
+        3: { halign: 'right', fontStyle: 'bold', textColor: [220, 38, 38] } // red
       }
     });
 
     finalY = (doc as any).lastAutoTable.finalY + 15;
   }
 
-  // --- PART 2: CURRENT INVOICE DETAILS ---
+  // --- PART 2: CURRENT INVOICE BREAKDOWN BY CARD ---
+  // This satisfies the request: "Quanto cada pessoa gastou em cada cartão"
+  doc.setFontSize(12);
+  doc.setTextColor(0, 0, 0);
+  doc.text(`Resumo por Pessoa e Cartão (${invoice.name})`, 14, finalY);
+
+  const breakdownBody: any[] = [];
+
+  people.forEach(person => {
+    const personExpenses = invoiceExpenses.filter(e => e.personId === person.id);
+    if (personExpenses.length === 0) return;
+
+    const personTotal = personExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+
+    // 1. Row for Person Name (Header)
+    breakdownBody.push([
+      { content: person.name, colSpan: 2, styles: { fontStyle: 'bold', fillColor: [241, 245, 249], textColor: [15, 23, 42] } },
+      { content: formatCurrency(personTotal), styles: { fontStyle: 'bold', fillColor: [241, 245, 249], textColor: [15, 23, 42], halign: 'right' } }
+    ]);
+
+    // 2. Rows for each Card
+    cards.forEach(card => {
+       const cardTotal = personExpenses
+         .filter(e => e.cardId === card.id)
+         .reduce((acc, curr) => acc + curr.amount, 0);
+
+       if (cardTotal > 0) {
+          breakdownBody.push([
+            "", // Indent
+            card.name,
+            { content: formatCurrency(cardTotal), styles: { halign: 'right' } }
+          ]);
+       }
+    });
+  });
+
+  autoTable(doc, {
+    startY: finalY + 5,
+    head: [["Pessoa", "Cartão", "Valor"]],
+    body: breakdownBody,
+    theme: "plain", // Cleaner look for nested data
+    headStyles: { fillColor: [50, 50, 50], textColor: [255, 255, 255] },
+    columnStyles: {
+      0: { cellWidth: 50 },
+      1: { cellWidth: 'auto' },
+      2: { cellWidth: 40, fontStyle: 'bold' }
+    },
+    didParseCell: function (data: any) {
+        // Add bottom border to the card rows to separate groups
+        if (data.row.raw[0] === "" && data.section === 'body') {
+            data.cell.styles.lineWidth = { bottom: 0.1 };
+            data.cell.styles.lineColor = [220, 220, 220];
+        }
+    }
+  });
+
+  finalY = (doc as any).lastAutoTable.finalY + 15;
+
+  // --- PART 3: DETAILED TRANSACTIONS ---
   doc.setFontSize(14);
   doc.setTextColor(79, 70, 229); // Indigo
-  doc.text(`Detalhamento da Fatura Atual`, 14, finalY);
+  doc.text(`Extrato Detalhado`, 14, finalY);
   finalY += 5;
 
   let globalTotal = 0;
 
-  // Loop through each person to create separated tables
   people.forEach((person) => {
     const personExpenses = invoiceExpenses.filter((e) => e.personId === person.id);
-
     if (personExpenses.length === 0) return;
 
-    // Calculate Person Total
     const personTotal = personExpenses.reduce((acc, curr) => acc + curr.amount, 0);
     globalTotal += personTotal;
 
-    // Section Header (Person Name)
-    doc.setFontSize(12);
+    // Person Title
+    doc.setFontSize(11);
     doc.setTextColor(50, 50, 50);
     doc.text(person.name, 14, finalY + 5);
 
-    // Prepare Table Data
+    // Table Data
     const tableBody = personExpenses.map((e) => {
         const cardName = cards.find(c => c.id === e.cardId)?.name || "Desconhecido";
         return [
@@ -99,24 +156,21 @@ export const generateInvoicePDF = (
         ];
     });
 
-    // Add Table
     autoTable(doc, {
       startY: finalY + 8,
       head: [["Data", "Descrição", "Cartão", "Valor"]],
       body: tableBody,
       theme: "striped",
-      headStyles: { fillColor: [79, 70, 229] }, // Indigo header
+      headStyles: { fillColor: [100, 116, 139] }, // Slate
       columnStyles: {
-        0: { cellWidth: 25 }, // Date
-        1: { cellWidth: 'auto' }, // Desc
-        2: { cellWidth: 35 }, // Card
-        3: { cellWidth: 35, halign: 'right', fontStyle: 'bold' }, // Amount
+        0: { cellWidth: 25 }, 
+        1: { cellWidth: 'auto' }, 
+        2: { cellWidth: 35 }, 
+        3: { cellWidth: 35, halign: 'right' }, 
       },
-      foot: [["", "", "Total Fatura:", formatCurrency(personTotal)]],
-      footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
+      // Removed per-table footer to save space and reduce noise
     });
 
-    // Update Y position for next loop
     finalY = (doc as any).lastAutoTable.finalY + 10;
   });
 

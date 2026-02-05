@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import { AppContextType } from "../types";
 import { Trash2, Plus, Banknote, History } from "lucide-react";
@@ -28,6 +29,13 @@ const PaymentList: React.FC<PaymentListProps> = ({ context }) => {
   };
 
   const getPersonName = (id: string) => people.find((p) => p.id === id)?.name || "Desconhecido";
+  
+  // Date Fix: Split string to avoid timezone issues
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "-";
+    const [year, month, day] = dateString.split('-');
+    return `${day}/${month}/${year}`;
+  };
 
   // Sort payments by date descending
   const sortedPayments = [...payments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -35,12 +43,34 @@ const PaymentList: React.FC<PaymentListProps> = ({ context }) => {
   return (
     <div className="space-y-6 animate-fade-in">
       
+      {/* Header */}
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-emerald-100 rounded-full text-emerald-600">
+            <Banknote size={24} />
+          </div>
+          <div>
+             <h2 className="text-xl font-bold text-slate-800">Pagamentos</h2>
+             <p className="text-slate-500 text-sm">Registro geral de abates e pagamentos realizados.</p>
+          </div>
+        </div>
+        
+        <div className="text-right">
+           <p className="text-xs text-slate-500 font-bold uppercase">Total Pago (Geral)</p>
+           <p className="text-2xl font-bold text-emerald-600">
+             {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+               payments.reduce((acc, curr) => acc + curr.amount, 0)
+             )}
+           </p>
+        </div>
+      </div>
+
       {/* Add Payment Section */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-        <div className="flex items-center gap-2 mb-4 text-emerald-700">
-          <Banknote size={24} />
-          <h3 className="text-lg font-bold">Registrar Pagamento de Fatura</h3>
-        </div>
+        <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2">
+           <Plus size={20} className="text-emerald-600" /> Registrar Pagamento
+        </h3>
+        
         <form onSubmit={handleAddPayment} className="flex flex-col md:flex-row gap-4 items-end">
           <div className="flex-1 w-full">
             <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Quem Pagou?</label>
@@ -55,7 +85,7 @@ const PaymentList: React.FC<PaymentListProps> = ({ context }) => {
             </select>
           </div>
           <div className="flex-1 w-full">
-            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Valor Pago (R$)</label>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Valor (R$)</label>
             <input
               type="number"
               step="0.01"
@@ -67,7 +97,7 @@ const PaymentList: React.FC<PaymentListProps> = ({ context }) => {
             />
           </div>
           <div className="flex-1 w-full">
-            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Data do Pagamento</label>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Data</label>
             <input
               type="date"
               required
@@ -80,7 +110,7 @@ const PaymentList: React.FC<PaymentListProps> = ({ context }) => {
             type="submit"
             className="w-full md:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg font-medium flex items-center justify-center gap-2 transition shadow-sm"
           >
-            <Plus size={18} /> Registrar
+            Adicionar
           </button>
         </form>
       </div>
@@ -89,10 +119,10 @@ const PaymentList: React.FC<PaymentListProps> = ({ context }) => {
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex items-center gap-2 bg-slate-50/50">
            <History size={18} className="text-slate-400"/>
-           <h4 className="font-semibold text-slate-700">Histórico de Pagamentos</h4>
+           <h4 className="font-semibold text-slate-700">Histórico Completo</h4>
         </div>
         
-        {payments.length === 0 ? (
+        {sortedPayments.length === 0 ? (
            <div className="p-8 text-center text-slate-400 italic">
              Nenhum pagamento registrado ainda.
            </div>
@@ -111,7 +141,7 @@ const PaymentList: React.FC<PaymentListProps> = ({ context }) => {
                 {sortedPayments.map((payment) => (
                   <tr key={payment.id} className="hover:bg-slate-50 transition">
                     <td className="px-6 py-3 whitespace-nowrap text-slate-600">
-                      {new Date(payment.date).toLocaleDateString("pt-BR")}
+                      {formatDate(payment.date)}
                     </td>
                     <td className="px-6 py-3 font-medium text-slate-800">
                       {getPersonName(payment.personId)}

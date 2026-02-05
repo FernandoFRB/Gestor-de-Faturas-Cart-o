@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from "react";
 import { HashRouter } from "react-router-dom";
 import { AppContextType, AppState, Person, CreditCard, Expense, Payment, Invoice } from "./types";
@@ -5,7 +6,8 @@ import Dashboard from "./components/Dashboard";
 import Settings from "./components/Settings";
 import ExpenseList from "./components/ExpenseList";
 import PaymentList from "./components/PaymentList";
-import { LayoutDashboard, CreditCard as CardIcon, Settings as SettingsIcon, Wallet, Banknote, FileText } from "lucide-react";
+import LoginScreen from "./components/LoginScreen";
+import { LayoutDashboard, Settings as SettingsIcon, Wallet, Banknote, FileText } from "lucide-react";
 
 const INITIAL_STATE: AppState = {
   people: [
@@ -21,6 +23,7 @@ const INITIAL_STATE: AppState = {
 };
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem("expenseManagerData");
     if (saved) {
@@ -60,13 +63,30 @@ export default function App() {
 
   const createInvoice = (name: string) => {
     const newId = crypto.randomUUID();
+    
+    // Prevent duplicates by checking existing names
+    let finalName = name;
+    let counter = 1;
+    // Check against current state to ensure uniqueness
+    while (state.invoices.some(i => i.name === finalName)) {
+      finalName = `${name} (${counter})`;
+      counter++;
+    }
+
     const newInvoice: Invoice = {
       id: newId,
-      name: name,
+      name: finalName,
       status: 'open',
     };
     setState(prev => ({ ...prev, invoices: [newInvoice, ...prev.invoices] }));
     return newId;
+  };
+
+  const renameInvoice = (id: string, newName: string) => {
+    setState(prev => ({
+      ...prev,
+      invoices: (prev.invoices || []).map(inv => inv.id === id ? { ...inv, name: newName } : inv)
+    }));
   };
 
   const toggleInvoiceStatus = (id: string) => {
@@ -83,8 +103,9 @@ export default function App() {
   const deleteInvoice = (id: string) => {
     setState(prev => ({
       ...prev,
-      invoices: prev.invoices.filter(i => i.id !== id),
-      expenses: prev.expenses.filter(e => e.invoiceId !== id) // Cascade delete expenses?
+      // Only delete the invoice and its expenses. Payments remain as they are global history.
+      invoices: (prev.invoices || []).filter(i => i.id !== id),
+      expenses: (prev.expenses || []).filter(e => e.invoiceId !== id)
     }));
   };
 
@@ -94,11 +115,15 @@ export default function App() {
     addCard, updateCard, deleteCard,
     addExpense, updateExpense, deleteExpense,
     addPayment, deletePayment,
-    createInvoice, toggleInvoiceStatus, deleteInvoice
+    createInvoice, renameInvoice, toggleInvoiceStatus, deleteInvoice
   };
 
+  if (!isAuthenticated) {
+    return <LoginScreen onLoginSuccess={() => setIsAuthenticated(true)} />;
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans animate-fade-in">
       <HashRouter>
         {/* Header */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
@@ -108,6 +133,13 @@ export default function App() {
               <h1 className="text-xl font-bold tracking-tight text-slate-900 hidden sm:block">Gestor de Faturas</h1>
               <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:hidden">Gestor</h1>
             </div>
+            {/* Logout button (just resets auth state) */}
+            <button 
+              onClick={() => setIsAuthenticated(false)} 
+              className="text-xs font-medium text-slate-500 hover:text-red-500 border border-slate-200 px-3 py-1 rounded-full transition"
+            >
+              Bloquear
+            </button>
           </div>
         </header>
 

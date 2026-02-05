@@ -1,3 +1,4 @@
+
 import React from "react";
 import {
   PieChart,
@@ -13,7 +14,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { AppContextType, CategoryType } from "../types";
-import { TrendingUp, Wallet, CreditCard, ArrowRight } from "lucide-react";
+import { TrendingUp, Wallet, CreditCard } from "lucide-react";
 
 const COLORS = [
   "#4f46e5", // indigo
@@ -35,16 +36,17 @@ const Dashboard: React.FC<DashboardProps> = ({ context }) => {
 
   // Identify the currently open invoice
   const openInvoice = invoices.find(i => i.status === 'open');
-  // Filter open expenses (Current Invoice) - assume logic is expenses with invoiceId = openInvoice.id
-  // OR if the logic is expenses without invoiceId are 'open' (legacy), but we switched to explicit invoiceId.
-  // Based on ExpenseList logic: expenses belong to invoiceId. 
-  // So "Fatura Atual" means the Open Invoice.
   const currentInvoiceId = openInvoice ? openInvoice.id : "none";
+  
+  // Expenses specific to the open invoice
   const openExpenses = expenses.filter(e => e.invoiceId === currentInvoiceId);
+  
+  // Payments are GLOBAL now, so we don't filter by invoice for payments.
 
   const currentInvoiceTotal = openExpenses.reduce((acc, curr) => acc + curr.amount, 0);
 
-  // Calculate Global Totals (All time)
+  // Global Calculation (All time)
+  // Total Debt = Total Expenses - Total Payments (regardless of invoice)
   const totalExpensesAllTime = expenses.reduce((acc, curr) => acc + curr.amount, 0);
   const totalPaymentsAllTime = payments.reduce((acc, curr) => acc + curr.amount, 0);
   const totalGlobalDebt = totalExpensesAllTime - totalPaymentsAllTime;
@@ -61,20 +63,19 @@ const Dashboard: React.FC<DashboardProps> = ({ context }) => {
     value: categoryDataMap[key],
   }));
 
-  // Person Balance Logic
+  // Person Logic
   const personData = people.map((person) => {
+    // 1. Current Invoice Logic (Only Spending)
     const personOpenExpenses = openExpenses.filter((e) => e.personId === person.id);
-
-    // 1. Current Invoice Spending (Open)
     const currentSpent = personOpenExpenses.reduce((acc, curr) => acc + curr.amount, 0);
-    
+
     // Breakdown by card for current invoice
     const currentByCard = personOpenExpenses.reduce((acc, curr) => {
        acc[curr.cardId] = (acc[curr.cardId] || 0) + curr.amount;
        return acc;
     }, {} as Record<string, number>);
 
-    // 2. Total History
+    // 2. Global History Logic
     const totalSpent = expenses
       .filter((e) => e.personId === person.id)
       .reduce((acc, curr) => acc + curr.amount, 0);
@@ -83,8 +84,8 @@ const Dashboard: React.FC<DashboardProps> = ({ context }) => {
       .filter((p) => p.personId === person.id)
       .reduce((acc, curr) => acc + curr.amount, 0);
     
-    // 3. Remaining Debt
-    const remainingDebt = totalSpent - totalPaid;
+    // 3. True Remaining Debt (Global)
+    const globalRemainingDebt = totalSpent - totalPaid;
 
     return {
       name: person.name,
@@ -92,7 +93,7 @@ const Dashboard: React.FC<DashboardProps> = ({ context }) => {
       currentByCard,
       totalSpent,
       totalPaid,
-      remainingDebt
+      globalRemainingDebt
     };
   });
 
@@ -128,7 +129,7 @@ const Dashboard: React.FC<DashboardProps> = ({ context }) => {
         )}
       </div>
 
-      {/* Person Cards - Detailed Debt Status */}
+      {/* Person Cards */}
       <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2">
         <Wallet className="text-slate-500" size={20} /> Situação Individual
       </h3>
@@ -137,8 +138,8 @@ const Dashboard: React.FC<DashboardProps> = ({ context }) => {
           <div key={p.name} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col relative overflow-hidden">
             <div className="flex justify-between items-start mb-4">
               <h4 className="font-bold text-xl text-slate-800">{p.name}</h4>
-              <div className={`px-2 py-1 rounded text-xs font-bold ${p.remainingDebt > 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                {p.remainingDebt > 0 ? "Devedor" : "Pago"}
+              <div className={`px-2 py-1 rounded text-xs font-bold ${p.globalRemainingDebt > 1 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                {p.globalRemainingDebt > 1 ? "Devedor" : "Em Dia"}
               </div>
             </div>
             
@@ -146,11 +147,15 @@ const Dashboard: React.FC<DashboardProps> = ({ context }) => {
             <div className="space-y-4">
               {/* Current Cycle */}
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                <div className="flex justify-between items-center mb-2">
-                  <p className="text-xs text-slate-500 uppercase font-semibold">Na Fatura Atual</p>
-                  <span className="text-lg font-bold text-indigo-600">{formatCurrency(p.currentSpent)}</span>
+                <div className="flex justify-between items-center mb-1">
+                  <p className="text-xs text-slate-500 uppercase font-semibold">Fatura Atual</p>
                 </div>
                 
+                <div className="flex justify-between text-sm text-slate-600 mb-1">
+                  <span>Gasto:</span>
+                  <span className="font-bold">{formatCurrency(p.currentSpent)}</span>
+                </div>
+
                 {/* Mini Breakdown by Card */}
                 {p.currentSpent > 0 && (
                   <div className="mt-2 pt-2 border-t border-slate-200 space-y-1">
@@ -170,22 +175,15 @@ const Dashboard: React.FC<DashboardProps> = ({ context }) => {
                 )}
               </div>
 
-              {/* Total Debt Calculation */}
+              {/* Total Debt Calculation (Global) */}
               <div>
-                <div className="flex justify-between text-sm mb-1 text-slate-500">
-                  <span>Total Gasto (Tudo)</span>
-                  <span>{formatCurrency(p.totalSpent)}</span>
-                </div>
-                <div className="flex justify-between text-sm mb-2 text-slate-500">
-                  <span>Total Pago</span>
-                  <span className="text-emerald-600 font-medium">- {formatCurrency(p.totalPaid)}</span>
-                </div>
                 <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
-                  <span className="font-bold text-slate-700">Saldo a Pagar:</span>
-                  <span className={`text-lg font-bold ${p.remainingDebt > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                    {formatCurrency(p.remainingDebt)}
+                  <span className="font-bold text-slate-700 text-sm">Saldo Devedor Total:</span>
+                  <span className={`text-lg font-bold ${p.globalRemainingDebt > 1 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {formatCurrency(p.globalRemainingDebt)}
                   </span>
                 </div>
+                <p className="text-[10px] text-slate-400 text-right mt-1">Acumulado (Gastos - Pagamentos)</p>
               </div>
             </div>
           </div>
@@ -211,7 +209,7 @@ const Dashboard: React.FC<DashboardProps> = ({ context }) => {
                   <YAxis />
                   <Tooltip formatter={(value: any) => formatCurrency(value)} />
                   <Legend />
-                  <Bar dataKey="remainingDebt" name="Dívida Restante" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="globalRemainingDebt" name="Dívida Total" fill="#ef4444" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (

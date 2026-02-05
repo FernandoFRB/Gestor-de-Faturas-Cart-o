@@ -1,3 +1,4 @@
+
 export interface Person {
   id: string;
   name: string;
@@ -34,6 +35,7 @@ export interface Payment {
   personId: string;
   amount: number;
   date: string;
+  // invoiceId removed to decouple payments from specific invoices
 }
 
 export enum CategoryType {
@@ -68,6 +70,7 @@ export interface AppContextType extends AppState {
   addPayment: (payment: Payment) => void;
   deletePayment: (id: string) => void;
   createInvoice: (name: string) => string; // Returns the new ID
+  renameInvoice: (id: string, newName: string) => void;
   toggleInvoiceStatus: (id: string) => void;
   deleteInvoice: (id: string) => void;
 }

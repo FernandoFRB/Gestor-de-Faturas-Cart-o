@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from "react";
 import { AppContextType, CategoryType, Expense } from "../types";
-import { Trash2, Calendar, CreditCard, Plus, Lock, Unlock, TrendingUp, PlusCircle, FileText, AlertTriangle, ArrowRight, Edit2 } from "lucide-react";
+import { Trash2, Calendar, CreditCard, Plus, Lock, Unlock, TrendingUp, PlusCircle, FileText, Edit2, X, Loader2, AlertTriangle } from "lucide-react";
 import { analyzeExpenseWithGemini } from "../services/geminiService";
 import { generateInvoicePDF } from "../services/pdfService";
 import ExpenseForm from "./ExpenseForm";
@@ -10,11 +11,15 @@ interface ExpenseListProps {
 }
 
 const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
-  const { expenses, people, cards, invoices, payments, createInvoice, addExpense, deleteExpense, toggleInvoiceStatus, deleteInvoice, addPayment } = context;
+  const { expenses, people, cards, invoices, payments, createInvoice, renameInvoice, addExpense, deleteExpense, toggleInvoiceStatus, deleteInvoice } = context;
   
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>("");
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
   const [newInvoiceName, setNewInvoiceName] = useState("");
+
+  // Edit Invoice Name State
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameName, setRenameName] = useState("");
 
   // Edit Expense State
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -22,7 +27,11 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
   // Close Invoice Modal State
   const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
   const [nextMonthName, setNextMonthName] = useState("");
-  const [closingDebts, setClosingDebts] = useState<{personId: string, name: string, debt: number}[]>([]);
+  const [isProcessingClose, setIsProcessingClose] = useState(false);
+  const [shouldCreateNext, setShouldCreateNext] = useState(true);
+
+  // Delete Invoice Modal State
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   // Fast Entry State
   const [amount, setAmount] = useState("");
@@ -31,18 +40,34 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
   const [cardId, setCardId] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
 
-  // Select the most recent open invoice on mount if none selected
+  // Handle Invoice Selection Logic (Robust to Deletions)
   useEffect(() => {
-    if (!selectedInvoiceId && invoices.length > 0) {
-      const open = invoices.find(i => i.status === 'open');
-      if (open) setSelectedInvoiceId(open.id);
-      else setSelectedInvoiceId(invoices[0].id);
+    // Check if the currently selected ID actually exists in the current list of invoices
+    const currentExists = invoices.find(i => i.id === selectedInvoiceId);
+
+    if (invoices.length > 0) {
+      // If nothing selected OR the selected one was deleted/doesn't exist
+      if (!selectedInvoiceId || !currentExists) {
+        const open = invoices.find(i => i.status === 'open');
+        if (open) {
+          setSelectedInvoiceId(open.id);
+        } else {
+          // If no open invoice, select the first one available
+          setSelectedInvoiceId(invoices[0].id);
+        }
+      }
+    } else {
+      // No invoices at all
+      setSelectedInvoiceId("");
     }
   }, [invoices, selectedInvoiceId]);
 
   // --- Helpers ---
   const selectedInvoice = invoices.find(i => i.id === selectedInvoiceId);
   const currentExpenses = expenses.filter(e => e.invoiceId === selectedInvoiceId);
+  
+  // No filtering for payments by invoice anymore. Payments are global.
+  
   const sortedExpenses = [...currentExpenses].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const totalInvoiceValue = currentExpenses.reduce((acc, curr) => acc + curr.amount, 0);
 
@@ -76,63 +101,77 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
     setNewInvoiceName("");
   };
 
+  const handleRename = () => {
+    if (!renameName.trim() || !selectedInvoice) return;
+    renameInvoice(selectedInvoice.id, renameName);
+    setIsRenaming(false);
+    setRenameName("");
+  };
+
+  const confirmDeleteInvoice = () => {
+    if (!selectedInvoice) return;
+    
+    const idToDelete = selectedInvoice.id;
+    
+    // Determine what to select NEXT before we delete the current one.
+    const otherInvoices = invoices.filter(i => i.id !== idToDelete);
+    const nextId = otherInvoices.length > 0 ? otherInvoices[0].id : "";
+    
+    // 1. Switch selection immediately (optimistic update)
+    setSelectedInvoiceId(nextId);
+    
+    // 2. Perform the deletion in global state
+    deleteInvoice(idToDelete);
+
+    // 3. Close modal
+    setIsDeleteModalOpen(false);
+  };
+
   const initiateCloseInvoice = () => {
     if (!selectedInvoice) return;
     
-    // Calculate Global Debt for each person
-    const debts = people.map(p => {
-       const totalSpent = expenses.filter(e => e.personId === p.id).reduce((acc, curr) => acc + curr.amount, 0);
-       const totalPaid = payments.filter(pay => pay.personId === p.id).reduce((acc, curr) => acc + curr.amount, 0);
-       return {
-         personId: p.id,
-         name: p.name,
-         debt: totalSpent - totalPaid
-       };
-    }).filter(d => d.debt > 1); // Filter debts > 1 real to avoid rounding annoyances
-
-    setClosingDebts(debts);
     setNextMonthName(getNextMonthName(selectedInvoice.name));
+    
+    // Only verify create next if it is the latest
+    const isLatest = invoices.length > 0 && invoices[0].id === selectedInvoice.id;
+    setShouldCreateNext(isLatest);
+
     setIsClosingModalOpen(true);
+    setIsProcessingClose(false);
   };
 
-  const confirmCloseInvoice = () => {
-    if (!selectedInvoice) return;
+  const confirmCloseInvoice = async (withPdf: boolean) => {
+    if (!selectedInvoice || isProcessingClose) return;
+    setIsProcessingClose(true);
 
-    // 0. Generate PDF Report automatically (passing ALL expenses and payments for global summary)
-    generateInvoicePDF(selectedInvoice, currentExpenses, people, cards, expenses, payments);
+    // 0. Generate PDF Report automatically (Optional)
+    if (withPdf) {
+      try {
+        // We pass ALL payments now, the PDF service handles the global summary
+        generateInvoicePDF(selectedInvoice, currentExpenses, people, cards, expenses, payments);
+      } catch (error) {
+        console.error("Erro ao gerar PDF:", error);
+        alert("Ocorreu um erro ao gerar o PDF, mas a fatura será fechada.");
+      }
+    }
 
-    // 1. Create Next Invoice
-    const newInvoiceId = createInvoice(nextMonthName);
+    // 1. Create Next Invoice (Only if checkbox checked)
+    let nextInvoiceId = "";
+    if (shouldCreateNext) {
+       nextInvoiceId = createInvoice(nextMonthName);
+    }
 
-    // 2. Handle Debts (Rollover)
-    closingDebts.forEach(debt => {
-       // A: Settle old
-       addPayment({
-         id: crypto.randomUUID(),
-         personId: debt.personId,
-         amount: debt.debt,
-         date: new Date().toISOString().split("T")[0],
-       });
-
-       // B: Create new debt
-       addExpense({
-         id: crypto.randomUUID(),
-         invoiceId: newInvoiceId,
-         personId: debt.personId,
-         cardId: cards[0]?.id || "unknown",
-         amount: debt.debt,
-         description: `Saldo Anterior (${selectedInvoice.name})`,
-         date: new Date().toISOString().split("T")[0],
-         categoryId: CategoryType.Other
-       });
-    });
-
-    // 3. Close Current
+    // 2. Close Current
     toggleInvoiceStatus(selectedInvoice.id);
 
-    // 4. Switch view
+    // 3. Switch view
     setIsClosingModalOpen(false);
-    setSelectedInvoiceId(newInvoiceId);
+    
+    if (nextInvoiceId) {
+        setSelectedInvoiceId(nextInvoiceId);
+    }
+    
+    setIsProcessingClose(false);
   };
 
   const handleAddExpense = async (e: React.FormEvent) => {
@@ -141,7 +180,6 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
 
     const finalDesc = description.trim() || "Gasto Diversos";
     
-    // Non-blocking AI call
     if (finalDesc !== "Gasto Diversos") {
        analyzeExpenseWithGemini(finalDesc, parseFloat(amount)).then(() => {});
     }
@@ -161,7 +199,6 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
     setDescription("");
   };
 
-  // If no invoices exist
   if (invoices.length === 0 && !isCreatingInvoice) {
     return (
       <div className="text-center py-12 bg-white rounded-xl shadow-sm border border-slate-100 animate-fade-in">
@@ -183,13 +220,66 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
   return (
     <div className="space-y-6 animate-fade-in relative">
       
-      {/* Edit Modal */}
+      {/* Edit Expense Modal */}
       {editingExpense && (
         <ExpenseForm 
           context={context} 
           onClose={() => setEditingExpense(null)} 
           initialData={editingExpense}
         />
+      )}
+
+      {/* Rename Invoice Modal */}
+      {isRenaming && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-fade-in">
+           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-2xl">
+              <h3 className="text-lg font-bold text-slate-800 mb-4">Renomear Fatura</h3>
+              <input 
+                type="text" 
+                value={renameName}
+                onChange={(e) => setRenameName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleRename()}
+                className="w-full border border-slate-300 rounded-lg p-3 text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none mb-4"
+                placeholder="Novo nome..."
+                autoFocus
+              />
+              <div className="flex justify-end gap-2">
+                 <button onClick={() => setIsRenaming(false)} className="px-4 py-2 text-slate-500 hover:text-slate-700">Cancelar</button>
+                 <button onClick={handleRename} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium">Salvar</button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-fade-in">
+           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-2xl">
+              <div className="flex flex-col items-center text-center mb-4">
+                 <div className="bg-red-100 p-3 rounded-full mb-3">
+                    <AlertTriangle className="text-red-600" size={32} />
+                 </div>
+                 <h3 className="text-xl font-bold text-slate-800">Excluir Fatura?</h3>
+                 <p className="text-slate-500 text-sm mt-2">
+                   Você está prestes a excluir <strong>{selectedInvoice?.name}</strong>. Todos os {currentExpenses.length} lançamentos vinculados a ela serão perdidos permanentemente.
+                 </p>
+              </div>
+              <div className="flex justify-center gap-3">
+                 <button 
+                   onClick={() => setIsDeleteModalOpen(false)} 
+                   className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 font-medium transition"
+                 >
+                   Cancelar
+                 </button>
+                 <button 
+                   onClick={confirmDeleteInvoice} 
+                   className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold transition flex items-center gap-2"
+                 >
+                   <Trash2 size={16} /> Confirmar Exclusão
+                 </button>
+              </div>
+           </div>
+        </div>
       )}
 
       {/* --- Header: Invoice Selector --- */}
@@ -237,32 +327,40 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
 
         {selectedInvoice && (
            <div className="flex items-center gap-4">
-              <div className="text-right">
+              <div className="text-right hidden sm:block">
                 <p className="text-xs text-slate-500 font-bold uppercase">Total Fatura</p>
                 <p className="text-2xl font-bold text-slate-800">{formatCurrency(totalInvoiceValue)}</p>
               </div>
-              <button 
-                onClick={() => selectedInvoice.status === 'open' ? initiateCloseInvoice() : toggleInvoiceStatus(selectedInvoice.id)}
-                className={`p-2 rounded-lg transition flex items-center gap-2 ${selectedInvoice.status === 'open' ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                title={selectedInvoice.status === 'open' ? "Fechar Fatura" : "Reabrir Fatura"}
-              >
-                {selectedInvoice.status === 'open' ? (
-                   <>
-                     <Lock size={20} /> <span className="text-sm font-bold hidden sm:inline">Fechar</span>
-                   </>
-                ) : <Unlock size={20} />}
-              </button>
-              <button 
-                onClick={() => {
-                  if(window.confirm("Excluir esta fatura e todos os seus lançamentos?")) {
-                    deleteInvoice(selectedInvoice.id);
-                    setSelectedInvoiceId("");
-                  }
-                }}
-                className="p-2 text-slate-300 hover:text-red-500 transition"
-              >
-                <Trash2 size={18} />
-              </button>
+              
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+                <button 
+                  onClick={() => selectedInvoice.status === 'open' ? initiateCloseInvoice() : toggleInvoiceStatus(selectedInvoice.id)}
+                  className={`p-2 rounded-md transition flex items-center gap-2 ${selectedInvoice.status === 'open' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                  title={selectedInvoice.status === 'open' ? "Fechar Fatura" : "Reabrir Fatura"}
+                >
+                  {selectedInvoice.status === 'open' ? <Lock size={18} /> : <Unlock size={18} />}
+                </button>
+                
+                <button 
+                  onClick={() => {
+                     setRenameName(selectedInvoice.name);
+                     setIsRenaming(true);
+                  }}
+                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-white hover:shadow-sm rounded-md transition"
+                  title="Renomear Fatura"
+                >
+                  <Edit2 size={18} />
+                </button>
+
+                <button 
+                  type="button"
+                  onClick={() => setIsDeleteModalOpen(true)}
+                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-white hover:shadow-sm rounded-md transition"
+                  title="Excluir Fatura Atual"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
            </div>
         )}
       </div>
@@ -271,58 +369,61 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
       {isClosingModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-fade-in">
            <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
-              <div className="p-6 bg-slate-50 border-b border-slate-100">
-                 <h3 className="text-xl font-bold text-slate-800">Fechar Fatura?</h3>
-                 <p className="text-slate-500 text-sm">Isso encerrará os lançamentos em <strong className="text-indigo-600">{selectedInvoice?.name}</strong>.</p>
+              <div className="p-6 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                 <div>
+                    <h3 className="text-xl font-bold text-slate-800">Fechar Fatura?</h3>
+                    <p className="text-slate-500 text-sm">Encerrar lançamentos em <strong className="text-indigo-600">{selectedInvoice?.name}</strong>.</p>
+                 </div>
+                 <button onClick={() => setIsClosingModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                    <X size={24} />
+                 </button>
               </div>
 
               <div className="p-6 space-y-4">
-                 {closingDebts.length > 0 ? (
-                    <div className="bg-amber-50 border border-amber-100 rounded-lg p-4">
-                       <div className="flex items-center gap-2 text-amber-700 font-bold mb-2">
-                          <AlertTriangle size={18} /> Valores em Aberto
-                       </div>
-                       <p className="text-xs text-amber-800 mb-3">
-                          As seguintes pessoas possuem dívidas pendentes. Esses valores serão transferidos para a próxima fatura como "Saldo Anterior".
-                       </p>
-                       <div className="space-y-2">
-                          {closingDebts.map(d => (
-                            <div key={d.personId} className="flex justify-between text-sm">
-                               <span className="text-slate-700 font-medium">{d.name}</span>
-                               <span className="text-red-600 font-bold">{formatCurrency(d.debt)}</span>
-                            </div>
-                          ))}
-                       </div>
-                    </div>
-                 ) : (
-                   <div className="text-center text-emerald-600 bg-emerald-50 p-3 rounded-lg text-sm font-medium">
-                      Tudo certo! Não há pendências de dívidas.
+                 
+                 {/* Option to create next invoice */}
+                 <div className="flex items-start gap-3 bg-slate-50 p-4 rounded-lg border border-slate-100">
+                    <input 
+                      type="checkbox" 
+                      id="createNext"
+                      checked={shouldCreateNext}
+                      onChange={(e) => setShouldCreateNext(e.target.checked)}
+                      className="mt-1 w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300 cursor-pointer"
+                    />
+                    <label htmlFor="createNext" className="text-sm text-slate-700 cursor-pointer">
+                       <span className="font-bold block text-slate-800">Criar próxima fatura automaticamente?</span>
+                       <span className="text-xs text-slate-500">Se desmarcado, a fatura atual será apenas fechada.</span>
+                    </label>
+                 </div>
+
+                 {shouldCreateNext && (
+                   <div className="animate-fade-in">
+                      <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nome da Próxima Fatura</label>
+                      <input 
+                        type="text" 
+                        value={nextMonthName}
+                        onChange={(e) => setNextMonthName(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg p-3 text-slate-800 font-medium focus:border-indigo-500 outline-none"
+                      />
                    </div>
                  )}
-
-                 <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Próxima Fatura (Automática)</label>
-                    <input 
-                      type="text" 
-                      value={nextMonthName}
-                      onChange={(e) => setNextMonthName(e.target.value)}
-                      className="w-full border border-slate-300 rounded-lg p-2 text-slate-800 font-medium focus:border-indigo-500 outline-none"
-                    />
-                 </div>
               </div>
 
-              <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-end gap-3">
                  <button 
-                   onClick={() => setIsClosingModalOpen(false)}
-                   className="px-4 py-2 text-slate-500 hover:text-slate-800 font-medium"
+                   onClick={() => confirmCloseInvoice(false)}
+                   disabled={isProcessingClose}
+                   className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-100 font-medium text-sm flex-1 sm:flex-none justify-center flex disabled:opacity-50"
                  >
-                   Cancelar
+                   Apenas Fechar
                  </button>
                  <button 
-                   onClick={confirmCloseInvoice}
-                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-bold flex items-center gap-2"
+                   onClick={() => confirmCloseInvoice(true)}
+                   disabled={isProcessingClose}
+                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-bold flex items-center justify-center gap-2 text-sm flex-1 sm:flex-none disabled:opacity-50"
                  >
-                   <Lock size={16} /> Fechar e Baixar PDF
+                   {isProcessingClose ? <Loader2 className="animate-spin" size={16} /> : <Lock size={16} />}
+                   Fechar e Baixar PDF
                  </button>
               </div>
            </div>
@@ -418,7 +519,14 @@ const ExpenseList: React.FC<ExpenseListProps> = ({ context }) => {
                 Relatório de Fechamento: <span className="text-emerald-400">{selectedInvoice.name}</span>
               </h3>
               <button 
-                 onClick={() => generateInvoicePDF(selectedInvoice, currentExpenses, people, cards, expenses, payments)}
+                 onClick={() => {
+                   try {
+                     // Pass all global payments
+                     generateInvoicePDF(selectedInvoice, currentExpenses, people, cards, expenses, payments);
+                   } catch(e) {
+                     alert("Erro ao gerar PDF");
+                   }
+                 }}
                  className="text-xs bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded flex items-center gap-2 transition"
               >
                  <FileText size={14} /> Baixar PDF

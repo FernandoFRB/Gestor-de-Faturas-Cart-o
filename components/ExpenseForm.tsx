@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { AppContextType, CategoryType, Expense } from "../types";
 import { analyzeExpenseWithGemini } from "../services/geminiService";
-import { Sparkles, Save, Loader2, Edit2 } from "lucide-react";
+import { Sparkles, Save, Loader2, Edit2, X } from "lucide-react";
 
 interface ExpenseFormProps {
   context: AppContextType;
@@ -63,6 +63,7 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose, initialData
         cardId,
         categoryId: category,
         aiAnalysis: aiTip || undefined,
+        // Invoice ID stays the same as original
       });
     } else {
       // Create new
@@ -89,136 +90,147 @@ const ExpenseForm: React.FC<ExpenseFormProps> = ({ context, onClose, initialData
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden animate-fade-in">
-        <div className="p-6 border-b border-slate-100 flex items-center gap-2">
-          {initialData ? <Edit2 size={20} className="text-indigo-600" /> : <Sparkles size={20} className="text-indigo-600" />}
-          <h2 className="text-xl font-bold text-slate-800">{initialData ? "Editar Despesa" : "Nova Despesa"}</h2>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="p-4 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+          <div className="flex items-center gap-2">
+            {initialData ? <Edit2 size={20} className="text-indigo-600" /> : <Sparkles size={20} className="text-indigo-600" />}
+            <h2 className="text-xl font-bold text-slate-800">{initialData ? "Editar Despesa" : "Nova Despesa"}</h2>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition">
+             <X size={24} />
+          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          
-          {/* Amount - High Priority */}
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">Valor (R$)</label>
-            <input
-              type="number"
-              required
-              step="0.01"
-              autoFocus={!initialData}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="w-full p-4 text-2xl font-bold text-slate-800 border border-slate-300 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition"
-              placeholder="0,00"
-            />
-          </div>
-
-          {/* Selectors */}
-          <div className="grid grid-cols-2 gap-4">
+        <div className="overflow-y-auto p-6 space-y-6">
+          <form id="expense-form" onSubmit={handleSubmit} className="space-y-6">
+            
+            {/* Amount - High Priority */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Quem Gastou?</label>
-              <select
-                value={personId}
-                onChange={(e) => setPersonId(e.target.value)}
-                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-              >
-                {people.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Qual Cartão?</label>
-              <select
-                value={cardId}
-                onChange={(e) => setCardId(e.target.value)}
-                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-              >
-                {cards.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.last4Digits})</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Date & Category */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Data</label>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Valor (R$)</label>
               <input
-                type="date"
+                type="number"
                 required
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                step="0.01"
+                autoFocus={!initialData}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full p-4 text-3xl font-bold text-slate-800 border border-slate-300 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition"
+                placeholder="0,00"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Categoria</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-              >
-                {Object.values(CategoryType).map((cat) => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
-            </div>
-          </div>
 
-          {/* Description (Optional) & AI */}
-          <div className="pt-2 border-t border-slate-100">
-            <label className="block text-sm font-medium text-slate-500 mb-1">
-              Descrição <span className="text-xs text-slate-400 font-normal">(Opcional)</span>
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="flex-1 p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                placeholder="Ex: Jantar..."
-              />
-              {description.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleAnalyze}
-                  disabled={isAnalyzing || !description || !amount}
-                  className="bg-indigo-50 text-indigo-600 px-3 py-2 rounded-lg hover:bg-indigo-100 disabled:opacity-50 flex items-center gap-2 transition"
-                  title="Preencher categoria e obter dica com IA"
+            {/* Selectors */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Quem Gastou?</label>
+                <select
+                  value={personId}
+                  onChange={(e) => setPersonId(e.target.value)}
+                  className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                 >
-                  {isAnalyzing ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-                  <span className="hidden sm:inline">IA</span>
-                </button>
-              )}
+                  {people.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Qual Cartão?</label>
+                <select
+                  value={cardId}
+                  onChange={(e) => setCardId(e.target.value)}
+                  className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                >
+                  {cards.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.last4Digits})</option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
 
-          {/* AI Tip Result */}
-          {aiTip && (
-            <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100 flex items-start gap-2">
-              <Sparkles className="text-indigo-600 mt-0.5 shrink-0" size={16} />
-              <p className="text-sm text-indigo-800 italic">"{aiTip}"</p>
+            {/* Date & Category */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Data</label>
+                <input
+                  type="date"
+                  required
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Categoria</label>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                >
+                  {Object.values(CategoryType).map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-          )}
 
-          <div className="flex justify-end gap-3 mt-6">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-slate-600 hover:text-slate-800 font-medium"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 transition shadow-sm"
-            >
-              <Save size={18} /> {initialData ? "Atualizar" : "Salvar"}
-            </button>
-          </div>
-        </form>
+            {/* Description (Optional) & AI */}
+            <div className="pt-2 border-t border-slate-100">
+              <label className="block text-sm font-medium text-slate-500 mb-1">
+                Descrição <span className="text-xs text-slate-400 font-normal">(Opcional)</span>
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="flex-1 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="Ex: Jantar..."
+                />
+                {description.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleAnalyze}
+                    disabled={isAnalyzing || !description || !amount}
+                    className="bg-indigo-50 text-indigo-600 px-3 py-2 rounded-lg hover:bg-indigo-100 disabled:opacity-50 flex items-center gap-2 transition"
+                    title="Preencher categoria e obter dica com IA"
+                  >
+                    {isAnalyzing ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
+                    <span className="hidden sm:inline">IA</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* AI Tip Result */}
+            {aiTip && (
+              <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex items-start gap-3">
+                <Sparkles className="text-indigo-600 mt-0.5 shrink-0" size={20} />
+                <div>
+                  <p className="text-xs font-bold text-indigo-800 uppercase mb-1">Dica Gemini</p>
+                  <p className="text-sm text-indigo-700 italic">"{aiTip}"</p>
+                </div>
+              </div>
+            )}
+          </form>
+        </div>
+
+        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-6 py-2 text-slate-600 hover:text-slate-800 font-medium"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            form="expense-form"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-2 rounded-lg font-medium flex items-center gap-2 transition shadow-sm"
+          >
+            <Save size={18} /> {initialData ? "Atualizar" : "Salvar"}
+          </button>
+        </div>
       </div>
     </div>
   );
